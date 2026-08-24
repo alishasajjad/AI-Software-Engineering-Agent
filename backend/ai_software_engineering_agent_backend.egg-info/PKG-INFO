@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: ai-software-engineering-agent-backend
+Version: 0.1.0
+Summary: Backend for the AI Software Engineering Agent
+Requires-Python: <3.14,>=3.13
+Requires-Dist: fastapi[standard]
+Requires-Dist: pydantic-settings
+Requires-Dist: sqlalchemy>=2.0
+Requires-Dist: alembic
+Requires-Dist: psycopg[binary]
+Requires-Dist: structlog
+Requires-Dist: openai-agents
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-asyncio; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: httpx; extra == "dev"
+Requires-Dist: ruff; extra == "dev"

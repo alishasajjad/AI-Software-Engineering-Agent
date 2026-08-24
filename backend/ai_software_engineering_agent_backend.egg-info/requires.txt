@@ -1,0 +1,14 @@
+fastapi[standard]
+pydantic-settings
+sqlalchemy>=2.0
+alembic
+psycopg[binary]
+structlog
+openai-agents
+
+[dev]
+pytest
+pytest-asyncio
+pytest-cov
+httpx
+ruff

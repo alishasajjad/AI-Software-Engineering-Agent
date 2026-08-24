@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "ai-software-engineering-agent-backend"
+version = "0.1.0"
+description = "Backend for the AI Software Engineering Agent"
+requires-python = ">=3.13,<3.14"
+
+dependencies = [
+    "fastapi[standard]",
+    "pydantic-settings",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "psycopg[binary]",
+    "structlog",
+    "openai-agents",
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "httpx",
+    "ruff",
+]
+
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+markers = [
+    "integration: tests that require external services such as PostgreSQL",
+]
+
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"migrations/versions/*.py" = ["E501"]
