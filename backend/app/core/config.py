@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     agent_max_turns: int = 12
     agent_formatter_max_turns: int = 3
+    
+    agent_editor_max_turns: int = 14
+    agent_editor_timeout_seconds: int = 180
 
     groq_api_key: str = ""
     
