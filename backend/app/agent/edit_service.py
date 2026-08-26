@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import asyncio
 import uuid
 
-from agents import Runner
 from agents.exceptions import MaxTurnsExceeded
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.agent.context import EngineeringAgentContext
 from app.agent.editor import build_code_editor_agent
+from app.agent.model_router import (
+    ModelFallbackExhaustedError,
+    run_agent_with_fallback,
+)
 from app.agent.service import (
     PlanGenerationError,
     create_implementation_plan,
@@ -26,7 +31,9 @@ from app.tools.repository import SecureWorkspace
 
 
 class PatchPreparationError(RuntimeError):
-    """Raised when AI patch preparation cannot be completed."""
+    """
+    Raised when AI patch preparation cannot be completed.
+    """
 
 
 class PendingPatchConflictError(RuntimeError):
@@ -64,12 +71,14 @@ def add_pending_patch_records(
     """
     Add pending patch records to the current transaction.
 
-    This function flushes but does not commit. That allows larger
-    workflows, such as self-correction, to persist patch records
-    and workflow state atomically.
+    This function flushes but does not commit. That allows
+    larger workflows, such as self-correction, to persist
+    patch records and workflow state atomically.
     """
 
-    records: list[PendingPatchRecord] = []
+    records: list[
+        PendingPatchRecord
+    ] = []
 
     for patch in patches:
         record = PendingPatchRecord(
@@ -91,8 +100,13 @@ def add_pending_patch_records(
             updated_at=patch.created_at,
         )
 
-        db.add(record)
-        records.append(record)
+        db.add(
+            record
+        )
+
+        records.append(
+            record
+        )
 
     try:
         db.flush()
@@ -121,9 +135,11 @@ def persist_pending_patches(
     """
 
     try:
-        records = add_pending_patch_records(
-            db=db,
-            patches=patches,
+        records = (
+            add_pending_patch_records(
+                db=db,
+                patches=patches,
+            )
         )
 
         db.commit()
@@ -144,7 +160,9 @@ def persist_pending_patches(
         raise
 
     for record in records:
-        db.refresh(record)
+        db.refresh(
+            record
+        )
 
     return records
 
@@ -175,7 +193,9 @@ def list_task_patches(
     )
 
     records = list(
-        db.scalars(statement).all()
+        db.scalars(
+            statement
+        ).all()
     )
 
     return [
@@ -186,10 +206,43 @@ def list_task_patches(
     ]
 
 
+def _clear_partial_editor_state(
+    context: EngineeringAgentContext,
+) -> None:
+    """
+    Clear temporary pending patches created by an interrupted
+    model attempt.
+
+    This is used only before a fallback model starts.
+
+    prepare_file_edit creates in-memory pending patches and
+    does not modify repository files, so clearing this list is
+    sufficient to restart the editor attempt safely.
+    """
+
+    context.pending_patches.clear()
+
+
 async def prepare_task_patches(
     db: Session,
     task_id: uuid.UUID,
 ) -> PatchPreparationResponse:
+    """
+    Generate safe pending patches for a task.
+
+    Model routing behavior:
+
+        primary model
+            ↓ rate limit
+        fallback model
+
+    Only genuine provider rate-limit/quota failures trigger
+    another model.
+
+    Partial in-memory patches from an interrupted model attempt
+    are discarded before the fallback model begins.
+    """
+
     task = db.get(
         Task,
         task_id,
@@ -246,8 +299,6 @@ async def prepare_task_patches(
         workspace=workspace,
     )
 
-    editor = build_code_editor_agent()
-
     editor_input = (
         "Software task title:\n"
         f"{task.title}\n\n"
@@ -259,48 +310,98 @@ async def prepare_task_patches(
         "--------------------------------\n\n"
         "Prepare the required pending code patches.\n\n"
         "Important execution rules:\n"
-        "- The implementation plan already identifies relevant files.\n"
-        "- Read those exact files directly whenever possible.\n"
-        "- Do not repeat repository searches unnecessarily.\n"
-        "- Do not re-read files after a successful patch proposal.\n"
-        "- Every modification must use prepare_file_edit.\n"
+        "- The implementation plan already identifies "
+        "relevant files.\n"
+        "- Read those exact files directly whenever "
+        "possible.\n"
+        "- Do not repeat repository searches "
+        "unnecessarily.\n"
+        "- Do not re-read files after a successful "
+        "patch proposal.\n"
+        "- Every modification must use "
+        "prepare_file_edit.\n"
         "- Do not modify files directly.\n"
-        "- Make the smallest changes required by the task.\n"
-        "- Stop calling tools once all necessary patches are prepared.\n"
+        "- Make the smallest changes required by the "
+        "task.\n"
+        "- Stop calling tools once all necessary patches "
+        "are prepared.\n"
         "- Return a final summary after patch preparation."
     )
 
+    def reset_editor_state() -> None:
+        _clear_partial_editor_state(
+            context
+        )
+
     try:
-        editor_result = await asyncio.wait_for(
-            Runner.run(
-                editor,
-                editor_input,
-                context=context,
-                max_turns=(
-                    settings.agent_editor_max_turns
+        editor_result = (
+            await asyncio.wait_for(
+                run_agent_with_fallback(
+                    operation_name=(
+                        "safe_code_editor"
+                    ),
+                    agent_factory=(
+                        build_code_editor_agent
+                    ),
+                    input_data=(
+                        editor_input
+                    ),
+                    context=context,
+                    max_turns=(
+                        settings
+                        .agent_editor_max_turns
+                    ),
+                    reset_before_fallback=(
+                        reset_editor_state
+                    ),
                 ),
-            ),
-            timeout=(
-                settings.agent_editor_timeout_seconds
-            ),
+                timeout=(
+                    settings
+                    .agent_editor_timeout_seconds
+                ),
+            )
         )
 
     except TimeoutError as exc:
+        _clear_partial_editor_state(
+            context
+        )
+
         raise PatchPreparationError(
             "Code editor timed out before completing "
             "patch preparation."
         ) from exc
 
     except MaxTurnsExceeded as exc:
+        _clear_partial_editor_state(
+            context
+        )
+
         raise PatchPreparationError(
             "Code editor exceeded the dedicated editor "
             "turn limit. The editing workflow did not "
             "finish safely."
         ) from exc
 
-    except Exception as exc:
+    except ModelFallbackExhaustedError as exc:
+        _clear_partial_editor_state(
+            context
+        )
+
         raise PatchPreparationError(
-            f"Code editor failed: {exc}"
+            "Code editor could not continue because all "
+            "configured AI models are currently rate "
+            f"limited: {exc}"
+        ) from exc
+
+    except Exception as exc:
+        _clear_partial_editor_state(
+            context
+        )
+
+        raise PatchPreparationError(
+            "Code editor failed: "
+            f"{type(exc).__name__}: {exc}"
         ) from exc
 
     editor_output = (
@@ -327,7 +428,9 @@ async def prepare_task_patches(
     if not context.pending_patches:
         return PatchPreparationResponse(
             task_id=task.id,
-            editor_summary=editor_summary,
+            editor_summary=(
+                editor_summary
+            ),
             patches=[],
         )
 
@@ -335,7 +438,9 @@ async def prepare_task_patches(
         stored_records = (
             persist_pending_patches(
                 db=db,
-                patches=context.pending_patches,
+                patches=(
+                    context.pending_patches
+                ),
             )
         )
 
@@ -357,6 +462,19 @@ async def prepare_task_patches(
 
     return PatchPreparationResponse(
         task_id=task.id,
-        editor_summary=editor_summary,
+        editor_summary=(
+            editor_summary
+        ),
         patches=stored_patches,
     )
+
+
+__all__ = [
+    "PatchPreparationError",
+    "PendingPatchConflictError",
+    "add_pending_patch_records",
+    "find_existing_pending_patches",
+    "list_task_patches",
+    "persist_pending_patches",
+    "prepare_task_patches",
+]

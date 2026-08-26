@@ -1,4 +1,9 @@
-from agents import Agent
+from __future__ import annotations
+
+from agents import (
+    Agent,
+    OpenAIChatCompletionsModel,
+)
 
 from app.agent.context import EngineeringAgentContext
 from app.agent.edit_tools import prepare_file_edit
@@ -137,11 +142,29 @@ Do not return Markdown code fences.
 
 
 def build_code_editor_agent(
+    model: OpenAIChatCompletionsModel | None = None,
 ) -> Agent[EngineeringAgentContext]:
+    """
+    Build the safe code editor agent.
+
+    A specific model may be injected by the central model
+    router.
+
+    If no model is supplied, the configured primary Groq
+    model is used. This keeps existing behavior backward
+    compatible.
+    """
+
+    selected_model = (
+        model
+        if model is not None
+        else get_groq_model()
+    )
+
     return Agent[EngineeringAgentContext](
         name="Safe Code Editor",
         instructions=CODE_EDITOR_INSTRUCTIONS,
-        model=get_groq_model(),
+        model=selected_model,
         tools=[
             search_code,
             read_file,
@@ -150,3 +173,9 @@ def build_code_editor_agent(
         ],
         reset_tool_choice=True,
     )
+
+
+__all__ = [
+    "CODE_EDITOR_INSTRUCTIONS",
+    "build_code_editor_agent",
+]

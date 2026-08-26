@@ -13,6 +13,9 @@ from app.db.session import get_db
 from app.schemas.correction import (
     FailureAnalysisResponse,
 )
+from app.schemas.correction_loop import (
+    CorrectionLoopResponse,
+)
 from app.schemas.correction_patch import (
     CorrectionPatchPreparationResponse,
 )
@@ -25,6 +28,11 @@ from app.schemas.correction_reverification import (
 from app.schemas.verification import (
     VerificationRequest,
     VerificationRunResponse,
+)
+from app.services.correction_loop_service import (
+    CorrectionLoopStateError,
+    advance_correction_loop,
+    get_correction_loop_status,
 )
 from app.services.correction_patch_service import (
     CorrectionPatchGenerationError,
@@ -158,7 +166,7 @@ def get_verification_run(
     db: DatabaseSession,
 ) -> VerificationRunResponse:
     """
-    Return one verification run with its execution steps.
+    Return one verification run with execution steps.
     """
 
     verification_run = (
@@ -276,8 +284,6 @@ def propose_verification_correction(
 ) -> CorrectionProposalResponse:
     """
     Generate a structured AI correction proposal.
-
-    No repository files are modified.
     """
 
     verification_run = (
@@ -355,10 +361,7 @@ async def prepare_verification_correction_patches(
     db: DatabaseSession,
 ) -> CorrectionPatchPreparationResponse:
     """
-    Convert a correction proposal into validated pending patches.
-
-    Repository files remain unchanged. Generated patches must be
-    reviewed through the existing approve/reject endpoints.
+    Convert a correction proposal into pending patches.
     """
 
     verification_run = (
@@ -446,15 +449,7 @@ def reverify_applied_correction(
     db: DatabaseSession,
 ) -> CorrectionReverificationResponse:
     """
-    Re-run automated verification after correction patches
-    have been applied.
-
-    A successful verification completes the correction session.
-
-    A failed verification creates a new analyzed retry session
-    while attempts remain.
-
-    When max_attempts is reached, the workflow stops safely.
+    Re-run verification after correction patches are applied.
     """
 
     source_verification = (
@@ -510,6 +505,165 @@ def reverify_applied_correction(
         raise HTTPException(
             status_code=(
                 status.HTTP_409_CONFLICT
+            ),
+            detail=str(exc),
+        ) from exc
+
+    except CorrectionReverificationError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    (
+        "/{verification_id}"
+        "/corrections/status"
+    ),
+    response_model=(
+        CorrectionLoopResponse
+    ),
+    status_code=status.HTTP_200_OK,
+    summary="Get Self-Correction Status",
+)
+def get_self_correction_status(
+    task_id: uuid.UUID,
+    verification_id: uuid.UUID,
+    db: DatabaseSession,
+) -> CorrectionLoopResponse:
+    """
+    Return the latest state, retry lineage, pending patch state,
+    next action, and safe-stop information for a self-correction
+    workflow.
+
+    The original failed verification id can continue to be used
+    after retry child sessions are created.
+    """
+
+    try:
+        return get_correction_loop_status(
+            db=db,
+            task_id=task_id,
+            verification_run_id=(
+                verification_id
+            ),
+        )
+
+    except CorrectionSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=str(exc),
+        ) from exc
+
+    except CorrectionLoopStateError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    (
+        "/{verification_id}"
+        "/corrections/advance"
+    ),
+    response_model=(
+        CorrectionLoopResponse
+    ),
+    status_code=status.HTTP_200_OK,
+    summary="Advance Self-Correction Loop",
+)
+async def advance_self_correction(
+    task_id: uuid.UUID,
+    verification_id: uuid.UUID,
+    db: DatabaseSession,
+) -> CorrectionLoopResponse:
+    """
+    Advance all currently safe automatic correction steps.
+
+    Automatic execution stops at:
+    - human patch review
+    - explicit patch application
+    - successful completion
+    - maximum attempts
+    - verification errors
+    - stale or rejected patches
+    - unsupported workflow states
+
+    Patch approval and patch application are never performed
+    automatically.
+    """
+
+    try:
+        return await advance_correction_loop(
+            db=db,
+            task_id=task_id,
+            verification_run_id=(
+                verification_id
+            ),
+        )
+
+    except CorrectionSessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=str(exc),
+        ) from exc
+
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail=str(exc),
+        ) from exc
+
+    except (
+        CorrectionLoopStateError,
+        InvalidVerificationStateError,
+        InvalidCorrectionSessionStateError,
+        CorrectionAttemptLimitError,
+        ExistingCorrectionPatchesError,
+        CorrectionPendingPatchConflictError,
+    ) as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_409_CONFLICT
+            ),
+            detail=str(exc),
+        ) from exc
+
+    except FailureAnalysisError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail=str(exc),
+        ) from exc
+
+    except (
+        CorrectionProposalGenerationError,
+        CorrectionPatchGenerationError,
+    ) as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
             ),
             detail=str(exc),
         ) from exc
