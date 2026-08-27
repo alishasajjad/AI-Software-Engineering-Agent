@@ -630,29 +630,43 @@ function App() {
   ) => {
     clearMessages()
 
+    if (
+      selectedTaskId === taskId
+  ) {
     setView(
       'workspace',
     )
 
     setTaskLoading(
-      true,
+      false,
     )
 
-    setPlan(null)
-    setCorrection(null)
-
-    setCorrectionVerificationId(
-      null,
-    )
-
-    setSelectedVerificationId(
-      null,
-    )
-
-    setSelectedTaskId(
-      taskId,
-    )
+    return
   }
+
+  setView(
+    'workspace',
+  )
+
+  setTaskLoading(
+    true,
+  )
+
+  setPlan(null)
+  setCorrection(null)
+
+  setCorrectionVerificationId(
+    null,
+  )
+
+  setSelectedVerificationId(
+    null,
+  )
+
+  setSelectedTaskId(
+    taskId,
+  )
+}
 
   const refreshTaskList =
     useCallback(async () => {

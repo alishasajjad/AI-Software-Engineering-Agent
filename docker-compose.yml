@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -23,11 +23,84 @@ services:
         ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: ai_software_agent_backend
+    restart: unless-stopped
+
+    env_file:
+      - ./backend/.env
+
+    environment:
+      APP_ENV: production
+      DEBUG: "false"
+
+      DATABASE_URL: >-
+        postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+    volumes:
+      - ./workspaces:/workspace
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    container_name: ai_software_agent_frontend
+    restart: unless-stopped
+
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1/ || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 
   postgres_test:
     image: postgres:17-alpine
     container_name: ai_software_agent_postgres_test
+
+    profiles:
+      - test
 
     environment:
       POSTGRES_DB: ${POSTGRES_TEST_DB}
@@ -35,7 +108,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD}
 
     ports:
-      - "${POSTGRES_TEST_PORT}:5432"
+      - "${POSTGRES_TEST_PORT:-5434}:5432"
+
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
 
     healthcheck:
       test:
@@ -45,7 +121,9 @@ services:
         ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
 
 volumes:
   postgres_data:
+  postgres_test_data:

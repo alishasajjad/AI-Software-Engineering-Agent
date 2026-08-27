@@ -1,0 +1,16 @@
+.venv
+.env
+.env.*
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+dist
+build
+*.egg-info
+.git
+.gitignore
+tests
+test_groq_structured.py
