@@ -8,6 +8,7 @@ An AI-powered software engineering agent that can inspect existing codebases, pl
 
 <br />
 
+[![CI](https://img.shields.io/github/actions/workflow/status/alishasajjad/AI-Software-Engineering-Agent/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/alishasajjad/AI-Software-Engineering-Agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)
